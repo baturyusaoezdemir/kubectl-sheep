@@ -129,9 +129,13 @@ command -v kubectl-sheep >/dev/null && kubectl sheep connect --quiet
 ```
 
 With `--quiet`, a healthy setup prints nothing; an expired token triggers the
-password prompt right at startup. Instances without a stored login are reported
-with a hint to run `rancher-instance update-token`. Exec-based contexts are left
-untouched because they load credentials on demand.
+password prompt right at startup. Instances behind another directory (other
+password) are named and asked for separately. Instances without a stored login
+are reported with a hint to run `rancher-instance update-token`. Exec-based
+contexts are left untouched because they load credentials on demand.
+
+For WSL users who want Windows tools to share the same kubeconfig,
+`hack/wsl-setup.sh` sets up everything in one run (see `docs/guide/wsl-setup.md`).
 
 ## Context names
 

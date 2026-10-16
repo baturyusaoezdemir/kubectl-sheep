@@ -312,7 +312,7 @@ func TestConnectWrongPasswordRetries(t *testing.T) {
 	if fake.logins != 2 {
 		t.Fatalf("expected 2 login attempts, got %d", fake.logins)
 	}
-	if !strings.Contains(out.String(), "Login as alice failed") {
+	if !strings.Contains(out.String(), "prod: login as alice failed") {
 		t.Fatalf("expected failed login notice, got:\n%s", out.String())
 	}
 	if got := storedToken(t); got != fakeNewToken {
@@ -452,5 +452,83 @@ func TestConnectNetworkErrorIsNotTreatedAsExpired(t *testing.T) {
 	}
 	if got := storedToken(t); got != fakeOldToken {
 		t.Fatalf("token must be kept, got %q", got)
+	}
+}
+
+// A second Rancher bound to another directory: same username, other password.
+func TestConnectSecondDirectoryAsksAgainAndRemembersBoth(t *testing.T) {
+	_, srv := newFakeRancher(t)
+	inst := setupConnectHome(t, srv.URL, adLogin())
+
+	otherPassword := "other-ad"
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/v3-public/"):
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["password"] != otherPassword {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "other-session"})
+		case r.URL.Path == "/v3/tokens":
+			_ = json.NewEncoder(w).Encode(map[string]string{"token": "other-token"})
+		case r.URL.Path == "/v3/clusters":
+			if r.Header.Get("Authorization") != "Bearer other-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(other.Close)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := config.Instance{Name: "legacy", URL: other.URL, Storage: config.StoragePlaintext, Auth: adLogin()}
+	third := config.Instance{Name: "dev", URL: srv.URL, Storage: config.StoragePlaintext, Auth: adLogin()}
+	for _, i := range []config.Instance{legacy, third} {
+		if err := cfg.AddInstance(i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	var prompts []string
+	answers := []string{fakePassword, otherPassword}
+	s := newConnectSession(&out, false, true)
+	s.readPassword = func(label, hint string) (string, error) {
+		prompts = append(prompts, label)
+		next := answers[0]
+		answers = answers[1:]
+		return next, nil
+	}
+
+	// prod → first prompt; legacy → known password rejected, second prompt;
+	// dev → both known passwords tried, the first one works, no prompt.
+	for _, i := range []*config.Instance{inst, &legacy, &third} {
+		if err := s.connectInstance(context.Background(), i); err != nil {
+			t.Fatalf("connect %s: %v\n%s", i.Name, err, out.String())
+		}
+	}
+
+	if len(prompts) != 2 {
+		t.Fatalf("expected exactly 2 prompts, got %d: %v", len(prompts), prompts)
+	}
+	if !strings.Contains(prompts[1], "legacy") {
+		t.Fatalf("second prompt should name the instance, got %q", prompts[1])
+	}
+	if !strings.Contains(out.String(), "legacy: the password used so far is not accepted") {
+		t.Fatalf("expected notice about the other directory, got:\n%s", out.String())
+	}
+	if len(s.passwords[adLogin().Key()]) != 2 {
+		t.Fatalf("expected both passwords remembered, got %d", len(s.passwords[adLogin().Key()]))
 	}
 }

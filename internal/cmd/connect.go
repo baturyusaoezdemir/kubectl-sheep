@@ -125,7 +125,7 @@ type connectSession struct {
 	readPassword passwordReader // nil when prompts are not possible
 	quiet        bool
 	noRefresh    bool
-	passwords    map[string]string // auth login key → password that worked or is being tried
+	passwords    map[string][]string // auth login key → passwords that worked, most recent first
 }
 
 func newConnectSession(out io.Writer, quiet, noRefresh bool) *connectSession {
@@ -133,8 +133,20 @@ func newConnectSession(out io.Writer, quiet, noRefresh bool) *connectSession {
 		out:       out,
 		quiet:     quiet,
 		noRefresh: noRefresh,
-		passwords: make(map[string]string),
+		passwords: make(map[string][]string),
 	}
+}
+
+// rememberPassword stores a working password for a login, most recent first.
+func (s *connectSession) rememberPassword(key, password string) {
+	known := s.passwords[key]
+	for i, p := range known {
+		if p == password {
+			known = append(known[:i], known[i+1:]...)
+			break
+		}
+	}
+	s.passwords[key] = append([]string{password}, known...)
 }
 
 // printf always writes; info writes only when not in quiet mode.
@@ -224,31 +236,43 @@ func (s *connectSession) renewToken(ctx context.Context, inst *config.Instance, 
 	}
 
 	key := inst.Auth.Key()
-	for attempt := 1; attempt <= maxPasswordAttempts; attempt++ {
-		password, cached := s.passwords[key]
-		if !cached {
-			hint := fmt.Sprintf("Rancher-instance %q: %s. Log in via %s to renew it.", inst.Name, reason, inst.Auth)
-			var err error
-			password, err = s.readPassword(fmt.Sprintf("Password for %s", inst.Auth.Username), hint)
-			if err != nil {
-				return "", err
-			}
-			if password == "" {
-				return "", fmt.Errorf("no password entered; token not renewed")
-			}
-		}
 
+	// Several instances usually share one directory, so try every password
+	// that already worked for this login before asking again. An instance
+	// bound to a different directory (other password) falls through to the prompt.
+	for _, password := range s.passwords[key] {
 		token, err := createTokenViaAuthLogin(ctx, inst.URL, inst.InsecureSkipVerify, inst.Auth, password)
 		if err == nil {
-			s.passwords[key] = password
+			s.rememberPassword(key, password)
 			return token, nil
 		}
 		if !errors.Is(err, rancher.ErrLoginFailed) {
 			return "", err
 		}
+	}
+	if len(s.passwords[key]) > 0 {
+		s.printf("  %s: the password used so far is not accepted for %s (different directory?)\n", inst.Name, inst.Auth)
+	}
 
-		delete(s.passwords, key)
-		s.printf("  Login as %s failed: invalid username or password\n", inst.Auth.Username)
+	for attempt := 1; attempt <= maxPasswordAttempts; attempt++ {
+		hint := fmt.Sprintf("Rancher-instance %q: %s. Log in via %s to renew it.", inst.Name, reason, inst.Auth)
+		password, err := s.readPassword(fmt.Sprintf("Password for %s @ %s", inst.Auth.Username, inst.Name), hint)
+		if err != nil {
+			return "", err
+		}
+		if password == "" {
+			return "", fmt.Errorf("no password entered; token not renewed")
+		}
+
+		token, err := createTokenViaAuthLogin(ctx, inst.URL, inst.InsecureSkipVerify, inst.Auth, password)
+		if err == nil {
+			s.rememberPassword(key, password)
+			return token, nil
+		}
+		if !errors.Is(err, rancher.ErrLoginFailed) {
+			return "", err
+		}
+		s.printf("  %s: login as %s failed: invalid username or password\n", inst.Name, inst.Auth.Username)
 	}
 	return "", fmt.Errorf("auth provider login failed after %d attempts", maxPasswordAttempts)
 }

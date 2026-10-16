@@ -9,6 +9,7 @@
     interactive: "interactive.md",
     "exec-kubeconfigs": "exec-kubeconfigs.md",
     connect: "connect.md",
+    "wsl-setup": "wsl-setup.md",
     configuration: "configuration.md",
   };
 

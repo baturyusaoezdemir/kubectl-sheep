@@ -126,9 +126,11 @@ func newRancherInstanceAddCmd() *cobra.Command {
 				return err
 			}
 
-			openBrowser, err = promptOpenBrowser(cmd, openBrowser)
-			if err != nil {
-				return err
+			if !authOpts.enabled {
+				openBrowser, err = promptOpenBrowser(cmd, openBrowser)
+				if err != nil {
+					return err
+				}
 			}
 
 			cfg, err := config.Load()

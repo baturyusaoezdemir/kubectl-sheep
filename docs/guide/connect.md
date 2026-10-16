@@ -12,6 +12,7 @@ kubectl sheep connect prod dev   # selected instances
 1. The stored Rancher API token is validated against the instance.
 2. If Rancher answers `401` (token expired, revoked, or missing):
    - Instances registered with an auth provider login (`--auth-login` / `--ldap-login`) prompt for that **provider password**. The password is asked **once** and reused for every instance that shares the same provider and username, so all Active Directory bound tokens are renewed with a single prompt.
+   - Instances bound to a **different directory** (same user name, other password) reject the known password; `connect` names the instance and asks again. Every password that worked is kept for the remaining instances of the run.
    - Instances without a stored login are reported with a hint to run `rancher-instance update-token`.
    - The new token is validated before the old one is replaced. Wrong passwords can be retried up to three times.
 3. Unless `--no-refresh` is set, every locally stored kubeconfig is re-fetched and re-merged into `~/.kube/config`.
@@ -54,6 +55,8 @@ kubectl sheep rancher-instance update-token prod --auth-login --auth-username al
 For an unattended startup, prefer `--storage plaintext` for these instances; encrypted storage asks for its passphrase before the token can be checked.
 
 ## WSL / Linux shell startup
+
+For a complete WSL + Windows walkthrough (shared Windows kubeconfig, team setup script) see [WSL + Windows setup](wsl-setup.md).
 
 Add one line to `~/.bashrc` (or `~/.zshrc`):
 
