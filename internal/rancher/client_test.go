@@ -179,3 +179,26 @@ func TestInsecureSkipVerify(t *testing.T) {
 		t.Fatal("expected insecureSkipVerify to be enabled")
 	}
 }
+
+func TestLoginAuthProviderRejected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3-public/activeDirectoryProviders/activeDirectory" || r.URL.Query().Get("action") != "login" {
+			t.Fatalf("unexpected URL: %s", r.URL.String())
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(srv.URL, "", false)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	_, err = client.LoginAuthProvider(context.Background(), "activeDirectory", "activeDirectory", "alice", "wrong")
+	if !errors.Is(err, ErrLoginFailed) {
+		t.Fatalf("expected ErrLoginFailed, got %v", err)
+	}
+	if errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("login failure must not look like an expired token: %v", err)
+	}
+}

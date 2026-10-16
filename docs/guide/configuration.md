@@ -23,7 +23,17 @@ instances:
     url: https://rancher.example.com
     storage: encrypted
     insecureSkipVerify: false
+  - name: dev
+    url: https://rancher.dev.example.com
+    storage: plaintext
+    insecureSkipVerify: false
+    auth:                          # set by --auth-login / --ldap-login, used by connect
+      providerType: activeDirectory
+      providerId: activeDirectory
+      username: alice
 ```
+
+The `auth` block never contains a password; it is prompted for when a token has to be renewed.
 
 ## Environment variables
 

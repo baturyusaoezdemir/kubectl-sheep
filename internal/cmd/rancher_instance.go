@@ -141,6 +141,7 @@ func newRancherInstanceAddCmd() *cobra.Command {
 				URL:                url,
 				InsecureSkipVerify: insecure,
 				Storage:            storage,
+				Auth:               authOpts.toConfig(),
 			}
 			if err := cfg.AddInstance(inst); err != nil {
 				return fmt.Errorf("add rancher-instance: %w", err)
@@ -215,13 +216,17 @@ func newRancherInstanceListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-			fprintln(w, "NAME\tURL\tSTORAGE\tINSECURE")
+			fprintln(w, "NAME\tURL\tSTORAGE\tINSECURE\tAUTH LOGIN")
 			for _, inst := range cfg.Instances {
 				insecure := "false"
 				if inst.InsecureSkipVerify {
 					insecure = "true"
 				}
-				fprint(w, "%s\t%s\t%s\t%s\n", inst.Name, inst.URL, inst.Storage, insecure)
+				auth := "-"
+				if inst.Auth != nil {
+					auth = inst.Auth.String()
+				}
+				fprint(w, "%s\t%s\t%s\t%s\t%s\n", inst.Name, inst.URL, inst.Storage, insecure, auth)
 			}
 			return w.Flush()
 		},
@@ -340,10 +345,6 @@ func newRancherInstanceUpdateTokenCmd() *cobra.Command {
 				return err
 			}
 			openBrowser, _ := cmd.Flags().GetBool("open")
-			authOpts, err := authLoginOptionsFromFlags(cmd)
-			if err != nil {
-				return err
-			}
 
 			cfg, err := config.Load()
 			if err != nil {
@@ -352,6 +353,16 @@ func newRancherInstanceUpdateTokenCmd() *cobra.Command {
 			inst, err := cfg.Find(name)
 			if err != nil {
 				return err
+			}
+
+			authOpts, err := resolveAuthLoginOptions(cmd, inst)
+			if err != nil {
+				return err
+			}
+			if authOpts.enabled && authOpts.fromConfig {
+				prompt.Step(cmd.OutOrStdout())
+				prompt.Note(cmd.OutOrStdout(), fmt.Sprintf("Using stored auth provider login: %s", inst.Auth))
+				prompt.Note(cmd.OutOrStdout(), "Pass --auth-login=false to paste a Rancher API token instead.")
 			}
 
 			if !authOpts.enabled {
@@ -395,6 +406,13 @@ func newRancherInstanceUpdateTokenCmd() *cobra.Command {
 				return err
 			}
 
+			if authOpts.enabled && !authOpts.fromConfig {
+				inst.Auth = authOpts.toConfig()
+				if err := cfg.Save(); err != nil {
+					return fmt.Errorf("save auth login settings: %w", err)
+				}
+			}
+
 			fprint(cmd.OutOrStdout(), "Updated token for rancher-instance %q\n", name)
 			return nil
 		},
@@ -408,9 +426,35 @@ func newRancherInstanceUpdateTokenCmd() *cobra.Command {
 
 type authLoginOptions struct {
 	enabled      bool
+	fromConfig   bool
 	providerType string
 	providerID   string
 	username     string
+}
+
+// toConfig converts enabled options into persistable instance settings.
+func (o authLoginOptions) toConfig() *config.AuthLogin {
+	if !o.enabled {
+		return nil
+	}
+	return &config.AuthLogin{
+		ProviderType: o.providerType,
+		ProviderID:   o.providerID,
+		Username:     o.username,
+	}
+}
+
+func authLoginOptionsFromConfig(auth *config.AuthLogin) authLoginOptions {
+	if auth == nil {
+		return authLoginOptions{}
+	}
+	return authLoginOptions{
+		enabled:      true,
+		fromConfig:   true,
+		providerType: auth.ProviderType,
+		providerID:   auth.ProviderID,
+		username:     auth.Username,
+	}
 }
 
 func addAuthLoginFlags(cmd *cobra.Command) {
@@ -456,6 +500,28 @@ func authLoginOptionsFromFlags(cmd *cobra.Command) (authLoginOptions, error) {
 	}, nil
 }
 
+// resolveAuthLoginOptions combines command-line flags with the auth login
+// stored for an instance. Flags win; without any auth flag the stored login is
+// used; --auth-login=false forces the manual token prompt.
+func resolveAuthLoginOptions(cmd *cobra.Command, inst *config.Instance) (authLoginOptions, error) {
+	opts, err := authLoginOptionsFromFlags(cmd)
+	if err != nil {
+		return authLoginOptions{}, err
+	}
+	if opts.enabled {
+		if opts.username == "" && inst != nil && inst.Auth != nil {
+			opts.username = inst.Auth.Username
+		}
+		return opts, nil
+	}
+
+	explicitlyDisabled := cmd.Flags().Changed("auth-login") || cmd.Flags().Changed("ldap-login")
+	if explicitlyDisabled || inst == nil || inst.Auth == nil {
+		return authLoginOptions{}, nil
+	}
+	return authLoginOptionsFromConfig(inst.Auth), nil
+}
+
 func readRancherToken(cmd *cobra.Command, rancherURL string, insecure bool, authOpts authLoginOptions, tokenLabel string) (string, error) {
 	if !authOpts.enabled {
 		return prompt.ReadSecret(os.Stdin, cmd.OutOrStdout(), tokenLabel)
@@ -465,8 +531,18 @@ func readRancherToken(cmd *cobra.Command, rancherURL string, insecure bool, auth
 		return "", fmt.Errorf("--auth-username is required with --auth-login")
 	}
 
-	password, err := prompt.ReadSecret(os.Stdin, cmd.OutOrStdout(), "Auth provider password")
+	password, err := prompt.ReadSecret(os.Stdin, cmd.OutOrStdout(), fmt.Sprintf("Auth provider password for %s", authOpts.username))
 	if err != nil {
+		return "", err
+	}
+
+	return createTokenViaAuthLogin(context.Background(), rancherURL, insecure, authOpts.toConfig(), password)
+}
+
+// createTokenViaAuthLogin logs in through a Rancher auth provider and converts
+// the resulting session into a long-lived Rancher API token.
+func createTokenViaAuthLogin(ctx context.Context, rancherURL string, insecure bool, auth *config.AuthLogin, password string) (string, error) {
+	if err := auth.Validate(); err != nil {
 		return "", err
 	}
 
@@ -475,7 +551,7 @@ func readRancherToken(cmd *cobra.Command, rancherURL string, insecure bool, auth
 		return "", err
 	}
 
-	sessionToken, err := client.LoginAuthProvider(context.Background(), authOpts.providerType, authOpts.providerID, authOpts.username, password)
+	sessionToken, err := client.LoginAuthProvider(ctx, auth.ProviderType, auth.ProviderID, auth.Username, password)
 	if err != nil {
 		return "", err
 	}
@@ -484,7 +560,7 @@ func readRancherToken(cmd *cobra.Command, rancherURL string, insecure bool, auth
 	if err != nil {
 		return "", err
 	}
-	token, err := tokenClient.CreateAPIToken(context.Background(), "kubectl-sheep")
+	token, err := tokenClient.CreateAPIToken(ctx, "kubectl-sheep")
 	if err != nil {
 		return "", err
 	}

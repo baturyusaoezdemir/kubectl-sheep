@@ -75,4 +75,5 @@ kubectl sheep kubeconfig get prod --all
 - [Rancher instances](rancher-instances.md) — token rotation, storage migration, removal
 - [Interactive mode](interactive.md) — prompts, menus, and `--no-input`
 - [Exec contexts](exec-kubeconfigs.md) — share kubeconfigs without embedded tokens
+- [Auto-connect at startup](connect.md) — renew expired tokens and refresh kubeconfigs when your shell opens
 - [Install](install.md) — shell completion setup

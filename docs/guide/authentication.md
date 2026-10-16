@@ -39,6 +39,15 @@ kubectl sheep rancher-instance add prod \
 
 `--ldap-login` is equivalent to `--auth-login` with LDAP provider defaults.
 
+### Stored login settings
+
+When an instance is added or its token is updated with `--auth-login` / `--ldap-login`, the provider type, provider ID, and username are stored in `instances.yaml` (never the password). They are used by:
+
+- `rancher-instance update-token <instance>` — prompts only for the password. Pass `--auth-login=false` to paste a token instead.
+- `connect` — renews expired tokens of all instances sharing the same login with a single password prompt. See [Auto-connect at startup](connect.md).
+
+`rancher-instance list` shows the stored login in the `AUTH LOGIN` column.
+
 ## Token storage
 
 | Mode | Location | Notes |
@@ -60,4 +69,10 @@ If Rancher returns 401, kubectl-sheep suggests updating the token:
 
 ```bash
 kubectl sheep rancher-instance update-token <instance>
+```
+
+To renew every expired token at once (and refresh stored kubeconfigs), run:
+
+```bash
+kubectl sheep connect
 ```

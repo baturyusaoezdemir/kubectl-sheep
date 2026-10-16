@@ -18,6 +18,9 @@ selectable per instance.
 On a TTY, many commands prompt for missing arguments with an interactive menu (🐑).
 Use --no-input to disable prompts for scripts and CI.
 
+Run "kubectl sheep connect" at shell startup to validate tokens, renew expired
+ones through a Rancher auth provider login, and refresh stored kubeconfigs.
+
 🪄 Enable shell completion with: kubectl sheep completion bash`
 )
 
@@ -32,6 +35,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(newConnectCmd())
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newRancherInstanceCmd())
 	root.AddCommand(newKubeconfigCmd())

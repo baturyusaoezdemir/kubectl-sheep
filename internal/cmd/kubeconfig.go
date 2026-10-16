@@ -320,24 +320,12 @@ func runRefreshAll(cmd *cobra.Command, instanceName string) error {
 		return err
 	}
 
-	allClusters, err := client.ListClusters(context.Background())
+	toRefresh, missing, err := storedClustersToRefresh(context.Background(), client, storedIDs)
 	if err != nil {
-		return err
+		return handleRancherError(instanceName, err)
 	}
-
-	byID := make(map[string]rancher.Cluster, len(allClusters))
-	for _, c := range allClusters {
-		byID[c.ID] = c
-	}
-
-	var toRefresh []rancher.Cluster
-	for _, id := range storedIDs {
-		c, ok := byID[id]
-		if !ok {
-			fprint(cmd.OutOrStdout(), "SKIP %s: cluster no longer exists in Rancher\n", id)
-			continue
-		}
-		toRefresh = append(toRefresh, c)
+	for _, id := range missing {
+		fprint(cmd.OutOrStdout(), "SKIP %s: cluster no longer exists in Rancher\n", id)
 	}
 
 	if len(toRefresh) == 0 {
@@ -355,6 +343,35 @@ func runRefreshAll(cmd *cobra.Command, instanceName string) error {
 		return fmt.Errorf("%d of %d clusters failed", failures, len(toRefresh))
 	}
 	return nil
+}
+
+// storedClustersToRefresh matches locally stored cluster IDs against the
+// clusters currently known to Rancher. IDs that no longer exist are returned
+// separately so callers can report them.
+func storedClustersToRefresh(ctx context.Context, client clusterLister, storedIDs []string) (toRefresh []rancher.Cluster, missing []string, err error) {
+	allClusters, err := client.ListClusters(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	byID := make(map[string]rancher.Cluster, len(allClusters))
+	for _, c := range allClusters {
+		byID[c.ID] = c
+	}
+
+	for _, id := range storedIDs {
+		c, ok := byID[id]
+		if !ok {
+			missing = append(missing, id)
+			continue
+		}
+		toRefresh = append(toRefresh, c)
+	}
+	return toRefresh, missing, nil
+}
+
+type clusterLister interface {
+	ListClusters(context.Context) ([]rancher.Cluster, error)
 }
 
 func installExecCluster(cmd *cobra.Command, instanceName, clusterRef, execCommand string) error {

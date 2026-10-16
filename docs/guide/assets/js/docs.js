@@ -8,6 +8,7 @@
     kubeconfigs: "kubeconfigs.md",
     interactive: "interactive.md",
     "exec-kubeconfigs": "exec-kubeconfigs.md",
+    connect: "connect.md",
     configuration: "configuration.md",
   };
 

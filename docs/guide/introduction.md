@@ -33,6 +33,7 @@ kubectl --context prod-my-cluster get nodes
 |-------|---------|
 | `rancher-instance` | Add, list, remove instances; update tokens; list remote clusters |
 | `kubeconfig` | Get, refresh, list local kubeconfigs; install exec contexts |
+| `connect` | Validate all tokens, renew expired ones via auth provider login, refresh stored kubeconfigs |
 | `auth exec` | Internal exec credential helper (used by exec contexts) |
 
 Run `kubectl sheep --help` for examples on every command.
@@ -42,6 +43,7 @@ Run `kubectl sheep --help` for examples on every command.
 - [Install](install.md) the plugin
 - Follow the [quick start](quickstart.md) walkthrough
 - Read about [interactive mode](interactive.md) and [authentication](authentication.md)
+- Set up [auto-connect at startup](connect.md) for WSL and Linux shells
 
 ## License
 

@@ -38,6 +38,10 @@ kubectl sheep kubeconfig get prod --all
 kubectl sheep kubeconfig refresh prod my-cluster
 kubectl sheep kubeconfig refresh prod --all
 kubectl sheep kubeconfig install-exec prod c-m-abc123
+
+# Validate all tokens, renew expired ones with your AD/LDAP password, refresh kubeconfigs
+kubectl sheep connect
+kubectl sheep connect --quiet        # for shell startup
 ```
 
 ### Interactive mode
@@ -100,6 +104,34 @@ kubectl sheep rancher-instance add prod \
   --ldap-login \
   --ldap-username alice
 ```
+
+The provider type, ID, and username are stored per instance (never the password).
+`rancher-instance update-token prod` then only asks for the password, and
+`connect` can renew expired tokens automatically.
+
+## Auto-connect at startup
+
+`kubectl sheep connect` validates the token of every configured instance, renews
+rejected tokens through the stored auth provider login, and refreshes all stored
+kubeconfigs. One password prompt covers every instance that shares the same
+login, so all Active Directory bound tokens are renewed together.
+
+```bash
+kubectl sheep connect              # all instances
+kubectl sheep connect prod dev     # selected instances
+kubectl sheep connect --no-refresh # tokens only
+```
+
+Add it to `~/.bashrc` or `~/.zshrc` (WSL or Linux) so it runs whenever a shell opens:
+
+```bash
+command -v kubectl-sheep >/dev/null && kubectl sheep connect --quiet
+```
+
+With `--quiet`, a healthy setup prints nothing; an expired token triggers the
+password prompt right at startup. Instances without a stored login are reported
+with a hint to run `rancher-instance update-token`. Exec-based contexts are left
+untouched because they load credentials on demand.
 
 ## Context names
 

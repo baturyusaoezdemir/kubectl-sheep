@@ -24,6 +24,9 @@ const (
   kubectl sheep kubeconfig get prod my-cluster
   kubectl sheep kubeconfig get prod --all
 
+  # Validate tokens, renew expired ones, refresh stored kubeconfigs (e.g. from ~/.bashrc)
+  kubectl sheep connect
+
   # 🐑 Interactive — omit arguments on a TTY
   kubectl sheep rancher-instance add
   kubectl sheep kubeconfig get
@@ -33,6 +36,22 @@ const (
   source <(kubectl sheep completion bash)`
 
 	exVersion = `  kubectl sheep version`
+
+	exConnect = `  # Check every configured Rancher instance and refresh stored kubeconfigs
+  kubectl sheep connect
+
+  # Only selected instances
+  kubectl sheep connect prod dev
+
+  # Renew tokens only, keep stored kubeconfigs untouched
+  kubectl sheep connect --no-refresh
+
+  # Shell startup (WSL/Linux): add to ~/.bashrc or ~/.zshrc
+  command -v kubectl-sheep >/dev/null && kubectl sheep connect --quiet
+
+  # Register an instance so that expired tokens can be renewed with your AD password
+  kubectl sheep rancher-instance add prod https://rancher.example.com \
+    --auth-login --auth-username alice`
 
 	exRancherInstance = `  kubectl sheep rancher-instance add prod https://rancher.example.com
   kubectl sheep rancher-instance list
@@ -71,6 +90,15 @@ const (
 
 	exRancherInstanceUpdateToken = `  kubectl sheep rancher-instance update-token prod
   kubectl sheep rancher-instance update-token prod --open
+
+  # Renew through an auth provider; the login settings are stored for "connect"
+  kubectl sheep rancher-instance update-token prod --auth-login --auth-username alice
+
+  # Instance registered with --auth-login: only the password is prompted
+  kubectl sheep rancher-instance update-token prod
+
+  # Force pasting a token although an auth login is stored
+  kubectl sheep rancher-instance update-token prod --auth-login=false
 
   # 🐑 Interactive — pick the instance
   kubectl sheep rancher-instance update-token`

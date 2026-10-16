@@ -115,7 +115,7 @@ func (c *Client) LoginAuthProvider(ctx context.Context, providerType, providerID
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return "", ErrTokenInvalid
+		return "", ErrLoginFailed
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", c.readError(resp)

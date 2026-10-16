@@ -13,6 +13,8 @@ kubectl sheep rancher-instance add <name> <url> [flags]
 | `--storage` | `encrypted` (default) or `plaintext` |
 | `--insecure` | Skip TLS certificate verification |
 | `--open` | Open the Rancher API key page in the browser |
+| `--auth-login`, `--auth-username` | Create the token via an auth provider login; the login is stored for later renewals |
+| `--ldap-login`, `--ldap-username` | Same for OpenLDAP (see [Authentication](authentication.md)) |
 
 Positional URL (no `--url` flag):
 
@@ -33,8 +35,9 @@ kubectl sheep rancher-instance list
 ```
 
 ```
-NAME   URL                          STORAGE    INSECURE
-prod   https://rancher.example.com  encrypted  false
+NAME   URL                          STORAGE    INSECURE  AUTH LOGIN
+prod   https://rancher.example.com  encrypted  false     activeDirectory (alice)
+dev    https://rancher.dev.example  plaintext  true      -
 ```
 
 ## Update token
@@ -46,11 +49,26 @@ kubectl sheep rancher-instance update-token prod
 kubectl sheep rancher-instance update-token prod --open
 ```
 
+With an auth provider login:
+
+```bash
+# Renew via Active Directory and store the login for future renewals
+kubectl sheep rancher-instance update-token prod --auth-login --auth-username alice
+
+# Instance already has a stored login: only the password is prompted
+kubectl sheep rancher-instance update-token prod
+
+# Paste a token although a login is stored
+kubectl sheep rancher-instance update-token prod --auth-login=false
+```
+
 Interactive — pick the instance:
 
 ```bash
 kubectl sheep rancher-instance update-token
 ```
+
+To renew all expired tokens at once, see [Auto-connect at startup](connect.md).
 
 ## Change storage mode
 

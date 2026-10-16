@@ -19,10 +19,61 @@ const (
 
 // Instance holds non-secret configuration for a Rancher instance.
 type Instance struct {
-	Name               string `yaml:"name"`
-	URL                string `yaml:"url"`
-	InsecureSkipVerify bool   `yaml:"insecureSkipVerify"`
-	Storage            string `yaml:"storage"`
+	Name               string     `yaml:"name"`
+	URL                string     `yaml:"url"`
+	InsecureSkipVerify bool       `yaml:"insecureSkipVerify"`
+	Storage            string     `yaml:"storage"`
+	Auth               *AuthLogin `yaml:"auth,omitempty"`
+}
+
+// AuthLogin describes how to obtain a Rancher API token through a Rancher auth
+// provider (for example Active Directory or OpenLDAP). The password is never
+// stored; it is prompted for whenever a token has to be (re)created.
+type AuthLogin struct {
+	ProviderType string `yaml:"providerType"`
+	ProviderID   string `yaml:"providerId"`
+	Username     string `yaml:"username"`
+}
+
+// Key identifies a login so that one password prompt can serve every instance
+// sharing the same provider and username.
+func (a *AuthLogin) Key() string {
+	if a == nil {
+		return ""
+	}
+	return a.ProviderType + "/" + a.ProviderID + "/" + a.Username
+}
+
+// String returns a short human-readable description, e.g. "activeDirectory (alice)".
+func (a *AuthLogin) String() string {
+	if a == nil {
+		return ""
+	}
+	label := a.ProviderType
+	if a.ProviderID != "" && a.ProviderID != a.ProviderType {
+		label += "/" + a.ProviderID
+	}
+	if a.Username != "" {
+		label += " (" + a.Username + ")"
+	}
+	return label
+}
+
+// Validate checks that all AuthLogin fields are set.
+func (a *AuthLogin) Validate() error {
+	if a == nil {
+		return fmt.Errorf("auth login must not be nil")
+	}
+	if strings.TrimSpace(a.ProviderType) == "" {
+		return fmt.Errorf("auth provider type must not be empty")
+	}
+	if strings.TrimSpace(a.ProviderID) == "" {
+		return fmt.Errorf("auth provider ID must not be empty")
+	}
+	if strings.TrimSpace(a.Username) == "" {
+		return fmt.Errorf("auth username must not be empty")
+	}
+	return nil
 }
 
 // Config is the top-level instances configuration file.

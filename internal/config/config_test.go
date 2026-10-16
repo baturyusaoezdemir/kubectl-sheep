@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +99,66 @@ func TestSaveLoad(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o700 {
 		t.Fatalf("expected dir mode 0700, got %o", info.Mode().Perm())
+	}
+}
+
+func TestAuthLoginRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &Config{
+		Instances: []Instance{
+			{Name: "manual", URL: "https://a.example.com", Storage: StoragePlaintext},
+			{
+				Name:    "ad",
+				URL:     "https://b.example.com",
+				Storage: StorageEncrypted,
+				Auth:    &AuthLogin{ProviderType: "activeDirectory", ProviderID: "activeDirectory", Username: "alice"},
+			},
+		},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	path, _ := InstancesPath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(raw), "auth:") != 1 {
+		t.Fatalf("auth block should only be written when set:\n%s", raw)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	manual, _ := loaded.Find("manual")
+	if manual.Auth != nil {
+		t.Fatalf("expected no auth login for manual instance, got %+v", manual.Auth)
+	}
+	ad, _ := loaded.Find("ad")
+	if ad.Auth == nil || ad.Auth.Username != "alice" || ad.Auth.ProviderType != "activeDirectory" {
+		t.Fatalf("unexpected auth login: %+v", ad.Auth)
+	}
+	if ad.Auth.String() != "activeDirectory (alice)" {
+		t.Fatalf("unexpected String(): %q", ad.Auth.String())
+	}
+	if got := (&AuthLogin{ProviderType: "ldap", ProviderID: "openldap", Username: "bob"}).String(); got != "ldap/openldap (bob)" {
+		t.Fatalf("unexpected String(): %q", got)
+	}
+}
+
+func TestAuthLoginValidate(t *testing.T) {
+	var nilLogin *AuthLogin
+	if err := nilLogin.Validate(); err == nil {
+		t.Fatal("expected error for nil login")
+	}
+	if err := (&AuthLogin{ProviderType: "ldap", ProviderID: "openldap"}).Validate(); err == nil {
+		t.Fatal("expected error for missing username")
+	}
+	if err := (&AuthLogin{ProviderType: "ldap", ProviderID: "openldap", Username: "bob"}).Validate(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

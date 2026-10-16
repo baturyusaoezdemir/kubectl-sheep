@@ -32,6 +32,10 @@ on commands that accept them.`
 
 	registerRancherInstanceCompletions(root)
 	registerKubeconfigCompletions(root)
+
+	if connect := findSubCommand(root, "connect"); connect != nil {
+		connect.ValidArgsFunction = completeRancherInstances
+	}
 }
 
 func registerRancherInstanceCompletions(root *cobra.Command) {
