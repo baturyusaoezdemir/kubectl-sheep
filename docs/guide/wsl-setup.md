@@ -83,6 +83,37 @@ kubectl config get-contexts
 kubectl --context prod-my-cluster get nodes
 ```
 
+### Check tokens when PowerShell starts
+
+PowerShell can run the same check through `wsl.exe`, so the kubeconfig is fresh even when you never open a WSL window. The password prompt works in the PowerShell console because `wsl.exe` attaches it to the same terminal.
+
+1. Create the profile if it does not exist and open it:
+
+   ```powershell
+   if (!(Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+   notepad $PROFILE
+   ```
+
+2. Append this block (replace `<you>`; add `-d <Distro>` after `wsl.exe` if Ubuntu is not your default distribution):
+
+   ```powershell
+   # >>> kubectl-sheep >>>
+   if ($Host.Name -eq 'ConsoleHost' -and (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+       wsl.exe -- env KUBECONFIG=/mnt/c/Users/<you>/.kube/config '~/.local/bin/kubectl-sheep' connect --quiet
+   }
+   # <<< kubectl-sheep <<<
+   ```
+
+3. If PowerShell refuses to load the profile, allow local scripts once:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   ```
+
+4. Open a new PowerShell window: with valid tokens nothing is printed; an expired token asks for the AD password right there.
+
+`wsl.exe` runs the command through the default shell non-interactively, so the `~/.bashrc` block (guarded by `case $- in *i*)`) does not run a second time.
+
 > Keep `kubeconfig install-exec` out of this setup: exec contexts would require kubectl-sheep on Windows. `connect` never touches exec contexts, so a mixed setup still works, but plain token contexts are what Windows needs here.
 
 ## Plain Linux hosts (servers, jump hosts)
