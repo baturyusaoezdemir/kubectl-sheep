@@ -72,6 +72,73 @@ func NewClient(baseURL, token string, insecureSkipVerify bool) (*Client, error) 
 	}, nil
 }
 
+// AuthProvider is an auth provider enabled on a Rancher instance, as listed by
+// the public endpoint GET /v3-public/authProviders.
+type AuthProvider struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+}
+
+// LoginType returns the provider type as used in the login URL, e.g.
+// "activeDirectory" for type "activeDirectoryProvider" or "openLdap" for
+// "openLdapProvider".
+func (p AuthProvider) LoginType() string {
+	return strings.TrimSuffix(p.Type, "Provider")
+}
+
+// SupportsPasswordLogin reports whether the provider accepts a username and
+// password through the API (directory-backed providers and the local one).
+// SAML and OIDC providers need a browser and are excluded.
+func (p AuthProvider) SupportsPasswordLogin() bool {
+	switch p.Type {
+	case "activeDirectoryProvider", "openLdapProvider", "freeIpaProvider", "localProvider":
+		return true
+	default:
+		return false
+	}
+}
+
+type authProviderListResponse struct {
+	Data []AuthProvider `json:"data"`
+}
+
+// ListAuthProviders returns the auth providers enabled on the instance. The
+// endpoint is public, so no token is required.
+func (c *Client) ListAuthProviders(ctx context.Context) ([]AuthProvider, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v3-public/authProviders", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, c.readError(resp)
+	}
+
+	var out authProviderListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode auth provider list: %w", err)
+	}
+	return out.Data, nil
+}
+
+// PasswordLoginProviders filters providers that accept a username and password.
+func PasswordLoginProviders(providers []AuthProvider) []AuthProvider {
+	var out []AuthProvider
+	for _, p := range providers {
+		if p.SupportsPasswordLogin() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // LoginAuthProvider authenticates against a Rancher auth provider and returns a session token.
 func (c *Client) LoginAuthProvider(ctx context.Context, providerType, providerID, username, password string) (string, error) {
 	providerType = strings.TrimSpace(providerType)

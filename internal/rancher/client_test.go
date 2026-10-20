@@ -202,3 +202,39 @@ func TestLoginAuthProviderRejected(t *testing.T) {
 		t.Fatalf("login failure must not look like an expired token: %v", err)
 	}
 }
+
+func TestListAuthProviders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3-public/authProviders" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Fatalf("public endpoint must be called without a token")
+		}
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"local","type":"localProvider"},
+			{"id":"openldap","type":"openLdapProvider"},
+			{"id":"keycloakoidc","type":"keyCloakOIDCProvider"}]}`))
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(srv.URL, "", false)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	providers, err := client.ListAuthProviders(context.Background())
+	if err != nil {
+		t.Fatalf("ListAuthProviders: %v", err)
+	}
+	if len(providers) != 3 {
+		t.Fatalf("expected 3 providers, got %d", len(providers))
+	}
+
+	pw := PasswordLoginProviders(providers)
+	if len(pw) != 2 || pw[0].ID != "local" || pw[1].ID != "openldap" {
+		t.Fatalf("unexpected password providers: %+v", pw)
+	}
+	if got := pw[1].LoginType(); got != "openLdap" {
+		t.Fatalf("expected login type openLdap, got %q", got)
+	}
+}

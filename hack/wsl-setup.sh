@@ -20,7 +20,9 @@ set -euo pipefail
 
 # ─── Team configuration — edit this block ────────────────────────────────────
 # One line per Rancher instance:  name|url[|provider-type|provider-id]
-# provider-type/-id default to activeDirectory. Use ldap|openldap for OpenLDAP.
+# Without provider fields the login provider is detected from the instance
+# (Active Directory, OpenLDAP, FreeIPA or local). Set it explicitly only when an
+# instance has several directory providers, e.g. "legacy|https://…|openLdap|openldap".
 INSTANCES=(
   "prod|https://rancher-prod.example.com"
   "dev|https://rancher-dev.example.com"
@@ -128,8 +130,8 @@ EXISTING="$("$SHEEP" rancher-instance list 2>/dev/null | awk 'NR>1 {print $1}' |
 
 for entry in "${INSTANCES[@]}"; do
   IFS='|' read -r name url ptype pid <<<"$entry"
-  ptype="${ptype:-activeDirectory}"
-  pid="${pid:-activeDirectory}"
+  ptype="${ptype:-auto}"
+  pid="${pid:-auto}"
 
   printf '\n  %s  (%s)\n' "$name" "$url"
   read -r -p "  AD user name [${DEFAULT_USER}]: " user

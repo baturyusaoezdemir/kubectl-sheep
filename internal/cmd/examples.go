@@ -74,7 +74,11 @@ const (
 
   # Log in via Rancher auth provider instead of pasting a token
   kubectl sheep rancher-instance add prod https://rancher.example.com \
-    --auth-login --auth-username alice`
+    --auth-login --auth-username alice
+
+  # Detect the provider (Active Directory, OpenLDAP, FreeIPA) from the instance
+  kubectl sheep rancher-instance add prod https://rancher.example.com \
+    --auth-login --auth-username alice --auth-provider-type auto --auth-provider-id auto`
 
 	exRancherInstanceList = `  kubectl sheep rancher-instance list`
 

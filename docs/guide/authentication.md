@@ -28,6 +28,18 @@ kubectl sheep rancher-instance add prod \
 
 `--auth-provider-type` and `--auth-provider-id` default to `activeDirectory`.
 
+### Detecting the provider
+
+Pass `auto` for both and kubectl-sheep reads the instance's public provider list (`/v3-public/authProviders`) and picks the one directory provider that supports password login (Active Directory, OpenLDAP or FreeIPA; Rancher's local accounts only when no directory is enabled):
+
+```bash
+kubectl sheep rancher-instance add prod https://rancher.example.com \
+  --auth-login --auth-username alice \
+  --auth-provider-type auto --auth-provider-id auto
+```
+
+The detected provider is stored for the instance. If several directory providers are enabled, the command lists them and asks you to choose. A login against a provider that does not exist on the instance (Rancher answers `500 authconfigs … not found`) is reported together with the providers that would work.
+
 ### LDAP shortcut
 
 ```bash

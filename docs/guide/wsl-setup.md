@@ -25,7 +25,7 @@ The script
 
 1. installs a user-local Go toolchain if needed and builds `~/.local/bin/kubectl-sheep`,
 2. points `KUBECONFIG` at the Windows kubeconfig (`/mnt/c/Users/<you>/.kube/config`),
-3. registers every instance with `--auth-login` (asks for your AD user name per instance and the password once per directory), stores tokens as `plaintext` so startup needs no passphrase,
+3. registers every instance with `--auth-login` (asks for your AD user name per instance and the password once per directory), detects the login provider from each instance, and stores tokens as `plaintext` so startup needs no passphrase,
 4. fetches all kubeconfigs (`kubeconfig get <instance> --all`),
 5. adds an auto-connect block to `~/.bashrc` (or `~/.zshrc`),
 6. runs the first `connect`.
@@ -97,6 +97,7 @@ The same script works without WSL: it detects the missing Windows profile and us
 
 | Symptom | Fix |
 |---------|-----|
+| `rancher API returned status 500: … authconfigs … "activeDirectory" not found` | The instance does not use that provider (often OpenLDAP instead of AD). | Use `--auth-provider-type auto --auth-provider-id auto` (the script's default) or the provider the error message lists. |
 | `✗ prod: token invalid or expired; run: … update-token prod` | The instance has no stored AD login. Run `update-token prod --auth-login --auth-username <user>` once. |
 | Prompt appears although the password is right | Another directory or a changed user name. Check with `rancher-instance list`, fix with `update-token <instance> --auth-login --auth-username <user>`. |
 | Nothing happens at shell start | The block runs only in interactive shells. Run `kubectl-sheep connect` manually to see output. |

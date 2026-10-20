@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/ahoz/kubectl-sheep/internal/browser"
@@ -168,6 +170,11 @@ func newRancherInstanceAddCmd() *cobra.Command {
 			}
 			if token == "" {
 				return fmt.Errorf("token must not be empty")
+			}
+			if authOpts.enabled {
+				if stored, err := cfg.Find(name); err == nil {
+					stored.Auth = lastResolvedAuth
+				}
 			}
 
 			if storage == config.StorageEncrypted {
@@ -409,7 +416,7 @@ func newRancherInstanceUpdateTokenCmd() *cobra.Command {
 			}
 
 			if authOpts.enabled && !authOpts.fromConfig {
-				inst.Auth = authOpts.toConfig()
+				inst.Auth = lastResolvedAuth
 				if err := cfg.Save(); err != nil {
 					return fmt.Errorf("save auth login settings: %w", err)
 				}
@@ -461,8 +468,8 @@ func authLoginOptionsFromConfig(auth *config.AuthLogin) authLoginOptions {
 
 func addAuthLoginFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("auth-login", false, "Create a Rancher API token by logging in through an auth provider")
-	cmd.Flags().String("auth-provider-type", "activeDirectory", "Rancher auth provider type for --auth-login")
-	cmd.Flags().String("auth-provider-id", "activeDirectory", "Rancher auth provider ID for --auth-login")
+	cmd.Flags().String("auth-provider-type", "activeDirectory", "Rancher auth provider type for --auth-login (\"auto\" detects it from the instance)")
+	cmd.Flags().String("auth-provider-id", "activeDirectory", "Rancher auth provider ID for --auth-login (\"auto\" detects it from the instance)")
 	cmd.Flags().String("auth-username", "", "Username for --auth-login")
 	cmd.Flags().Bool("ldap-login", false, "Shortcut for --auth-login --auth-provider-type=ldap --auth-provider-id=openldap")
 	cmd.Flags().String("ldap-provider", "openldap", "Rancher LDAP provider ID for --ldap-login")
@@ -533,17 +540,117 @@ func readRancherToken(cmd *cobra.Command, rancherURL string, insecure bool, auth
 		return "", fmt.Errorf("--auth-username is required with --auth-login")
 	}
 
-	password, err := prompt.ReadSecret(os.Stdin, cmd.OutOrStdout(), fmt.Sprintf("Auth provider password for %s", authOpts.username))
+	auth, err := resolveAutoAuthProvider(context.Background(), rancherURL, insecure, authOpts.toConfig())
+	if err != nil {
+		return "", err
+	}
+	lastResolvedAuth = auth
+	if auth.ProviderType != authOpts.providerType || auth.ProviderID != authOpts.providerID {
+		prompt.Note(cmd.OutOrStdout(), fmt.Sprintf("Detected auth provider: %s", auth))
+	}
+
+	password, err := prompt.ReadSecret(os.Stdin, cmd.OutOrStdout(), fmt.Sprintf("Auth provider password for %s", auth.Username))
 	if err != nil {
 		return "", err
 	}
 
-	return createTokenViaAuthLogin(context.Background(), rancherURL, insecure, authOpts.toConfig(), password)
+	return createTokenViaAuthLogin(context.Background(), rancherURL, insecure, auth, password)
+}
+
+// lastResolvedAuth holds the auth login readRancherToken actually used, with
+// "auto" provider settings replaced by the detected provider, so that add and
+// update-token persist concrete values.
+var lastResolvedAuth *config.AuthLogin
+
+// autoAuthProvider is the flag value that asks kubectl-sheep to detect the
+// provider from the instance's public auth provider list.
+const autoAuthProvider = "auto"
+
+// resolveAutoAuthProvider replaces "auto" provider settings with the one
+// password-capable provider enabled on the instance. A directory provider is
+// preferred over Rancher's local accounts; several directory providers are an
+// error that lists them so the user can pick one explicitly.
+func resolveAutoAuthProvider(ctx context.Context, rancherURL string, insecure bool, auth *config.AuthLogin) (*config.AuthLogin, error) {
+	if auth == nil {
+		return nil, fmt.Errorf("auth login must not be nil")
+	}
+	if auth.ProviderType != autoAuthProvider && auth.ProviderID != autoAuthProvider {
+		return auth, nil
+	}
+
+	client, err := rancher.NewClient(rancherURL, "", insecure)
+	if err != nil {
+		return nil, err
+	}
+	providers, err := client.ListAuthProviders(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("detect auth provider: %w", err)
+	}
+
+	candidates := rancher.PasswordLoginProviders(providers)
+	var directory, local []rancher.AuthProvider
+	for _, p := range candidates {
+		if p.Type == "localProvider" {
+			local = append(local, p)
+		} else {
+			directory = append(directory, p)
+		}
+	}
+
+	var chosen rancher.AuthProvider
+	switch {
+	case len(directory) == 1:
+		chosen = directory[0]
+	case len(directory) == 0 && len(local) == 1:
+		chosen = local[0]
+	case len(directory) == 0:
+		return nil, fmt.Errorf("no auth provider with password login is enabled on %s (enabled: %s); create a Rancher API token instead", rancherURL, describeProviders(providers))
+	default:
+		return nil, fmt.Errorf("several directory providers are enabled on %s (%s); pass --auth-provider-type and --auth-provider-id explicitly", rancherURL, describeProviders(directory))
+	}
+
+	resolved := *auth
+	resolved.ProviderType = chosen.LoginType()
+	resolved.ProviderID = chosen.ID
+	return &resolved, nil
+}
+
+func describeProviders(providers []rancher.AuthProvider) string {
+	if len(providers) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(providers))
+	for _, p := range providers {
+		parts = append(parts, fmt.Sprintf("--auth-provider-type %s --auth-provider-id %s", p.LoginType(), p.ID))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// authLoginHint appends the list of usable providers to an error that is not a
+// plain wrong-password failure, e.g. Rancher's 500 "authconfigs ... not found"
+// when the configured provider does not exist on the instance.
+func authLoginHint(ctx context.Context, rancherURL string, insecure bool, err error) error {
+	if err == nil || errors.Is(err, rancher.ErrLoginFailed) {
+		return err
+	}
+	client, cerr := rancher.NewClient(rancherURL, "", insecure)
+	if cerr != nil {
+		return err
+	}
+	providers, lerr := client.ListAuthProviders(ctx)
+	if lerr != nil {
+		return err
+	}
+	return fmt.Errorf("%w\n  providers with password login on %s: %s", err, rancherURL, describeProviders(rancher.PasswordLoginProviders(providers)))
 }
 
 // createTokenViaAuthLogin logs in through a Rancher auth provider and converts
 // the resulting session into a long-lived Rancher API token.
 func createTokenViaAuthLogin(ctx context.Context, rancherURL string, insecure bool, auth *config.AuthLogin, password string) (string, error) {
+	auth, err := resolveAutoAuthProvider(ctx, rancherURL, insecure, auth)
+	if err != nil {
+		return "", err
+	}
 	if err := auth.Validate(); err != nil {
 		return "", err
 	}
@@ -555,7 +662,7 @@ func createTokenViaAuthLogin(ctx context.Context, rancherURL string, insecure bo
 
 	sessionToken, err := client.LoginAuthProvider(ctx, auth.ProviderType, auth.ProviderID, auth.Username, password)
 	if err != nil {
-		return "", err
+		return "", authLoginHint(ctx, rancherURL, insecure, err)
 	}
 
 	tokenClient, err := rancher.NewClient(rancherURL, sessionToken, insecure)
