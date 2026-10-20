@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
-# kubectl-sheep — WSL team setup
+# kubectl-sheep — WSL / Linux team setup
 #
-# Installs kubectl-sheep in WSL, registers the team's Rancher instances with an
-# Active Directory login, fetches every kubeconfig into the *Windows* kubeconfig
-# (so kubectl, Lens, k9s … on Windows and in WSL share one standard file), and
-# makes "kubectl-sheep connect" run whenever a WSL shell opens.
+# Installs kubectl-sheep, registers the team's Rancher instances with an
+# Active Directory login, fetches every kubeconfig and makes
+# "kubectl-sheep connect" run whenever an interactive shell opens.
+#
+# In WSL the kubeconfig is written to the *Windows* kubeconfig, so kubectl,
+# Lens, k9s … on Windows and in WSL share one standard file. On a plain Linux
+# host (workstation, jump host, server) it is ~/.kube/config.
 #
 # Re-running the script is safe: existing instances are updated, not duplicated.
 #
@@ -49,7 +52,9 @@ note() { printf '  %s\n' "$*"; }
 die()  { printf '\n\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ─── 0. Preconditions ────────────────────────────────────────────────────────
-grep -qi microsoft /proc/version 2>/dev/null || note "Warning: this does not look like WSL; continuing anyway."
+IS_WSL=0
+grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
+[ "$IS_WSL" = 1 ] || note "Plain Linux detected (no WSL): the kubeconfig stays at ~/.kube/config."
 command -v git >/dev/null || die "git is required (sudo apt install git)"
 command -v curl >/dev/null || die "curl is required (sudo apt install curl)"
 mkdir -p "$BIN_DIR"
@@ -94,16 +99,16 @@ note "installed $SHEEP ($("$SHEEP" version 2>/dev/null || echo dev))"
 command -v kubectl >/dev/null || note "Note: kubectl is not installed in WSL. The Windows kubectl will still work; install it in WSL to use 'kubectl sheep …' here."
 
 # ─── 3. Share the Windows kubeconfig ─────────────────────────────────────────
-say "Locating the Windows kubeconfig"
+say "Choosing the kubeconfig to write"
 WIN_PROFILE=""
-if command -v cmd.exe >/dev/null; then
+if [ "$IS_WSL" = 1 ] && command -v cmd.exe >/dev/null; then
   WIN_PROFILE="$(cmd.exe /C 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r' || true)"
 fi
 if [ -n "$WIN_PROFILE" ] && command -v wslpath >/dev/null; then
   KUBECONFIG_PATH="$(wslpath "$WIN_PROFILE")/.kube/config"
 else
   KUBECONFIG_PATH="$HOME/.kube/config"
-  note "Windows profile not found; using $KUBECONFIG_PATH instead."
+  [ "$IS_WSL" = 1 ] && note "Windows profile not found; using $KUBECONFIG_PATH instead."
 fi
 mkdir -p "$(dirname "$KUBECONFIG_PATH")"
 export KUBECONFIG="$KUBECONFIG_PATH"
@@ -161,7 +166,7 @@ say "Running the first connect"
 "$SHEEP" connect
 
 say "Done"
-note "Open a new WSL shell: tokens are checked automatically."
+note "Open a new shell (or log in again via SSH): tokens are checked automatically."
 if [ -n "$WIN_PROFILE" ]; then
   note "Windows: kubectl / Lens / k9s use ${WIN_PROFILE}\\.kube\\config as usual — no plugin needed there."
 fi

@@ -85,6 +85,14 @@ kubectl --context prod-my-cluster get nodes
 
 > Keep `kubeconfig install-exec` out of this setup: exec contexts would require kubectl-sheep on Windows. `connect` never touches exec contexts, so a mixed setup still works, but plain token contexts are what Windows needs here.
 
+## Plain Linux hosts (servers, jump hosts)
+
+The same script works without WSL: it detects the missing Windows profile and uses `~/.kube/config`. The auto-connect block runs in every interactive shell, so an SSH login triggers the token check and, if needed, the password prompt on that terminal.
+
+- Non-interactive SSH commands (`ssh host kubectl get pods`) skip the block, so scripts are never blocked by a prompt.
+- Cron or systemd jobs run without a terminal: use `kubectl-sheep connect --no-input` there. An expired token is then reported as an error instead of prompting.
+- On distributions whose login shell does not source `~/.bashrc` (SSH gives you a login shell), add `[ -f ~/.bashrc ] && . ~/.bashrc` to `~/.bash_profile` or `~/.profile`.
+
 ## Troubleshooting
 
 | Symptom | Fix |
