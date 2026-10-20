@@ -89,6 +89,22 @@ kubectl --context prod-my-cluster get nodes
 
 The same script works without WSL: it detects the missing Windows profile and uses `~/.kube/config`. The auto-connect block runs in every interactive shell, so an SSH login triggers the token check and, if needed, the password prompt on that terminal.
 
+### Hosts without internet access
+
+The host only needs to reach the Rancher instances, not GitHub or go.dev. Build an offline bundle on a machine with internet (your WSL), copy it over, and run the same script from the bundle. It then installs the prebuilt binary and skips git, Go and every download.
+
+```bash
+# in WSL: static linux/amd64 binary + script (+ instance list) → one tarball
+INSTANCES_FILE=rancher.txt bash wsl-setup.sh bundle        # BUNDLE_ARCH=arm64 for ARM hosts
+scp kubectl-sheep-offline-amd64.tar.gz server:
+
+# on the server
+tar xzf kubectl-sheep-offline-amd64.tar.gz
+bash kubectl-sheep-offline-amd64/wsl-setup.sh
+```
+
+`instances.txt` inside the bundle is used automatically. Any other prebuilt binary works too: `SHEEP_BINARY=/path/to/kubectl-sheep bash wsl-setup.sh`. Copy `kubectl` to the host the same way if it is missing there.
+
 - Non-interactive SSH commands (`ssh host kubectl get pods`) skip the block, so scripts are never blocked by a prompt.
 - Cron or systemd jobs run without a terminal: use `kubectl-sheep connect --no-input` there. An expired token is then reported as an error instead of prompting.
 - On distributions whose login shell does not source `~/.bashrc` (SSH gives you a login shell), add `[ -f ~/.bashrc ] && . ~/.bashrc` to `~/.bash_profile` or `~/.profile`.

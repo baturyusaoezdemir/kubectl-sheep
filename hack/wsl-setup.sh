@@ -16,6 +16,16 @@
 #   bash wsl-setup.sh                 # interactive (asks for AD user names)
 #   AD_USER=alice bash wsl-setup.sh   # preset the default user name
 #
+# Hosts without internet access (servers, jump hosts):
+#   bash wsl-setup.sh bundle          # on a machine WITH internet (e.g. WSL):
+#                                     #   builds a static linux binary and packs it with this
+#                                     #   script into kubectl-sheep-offline-<arch>.tar.gz
+#   scp kubectl-sheep-offline-amd64.tar.gz server:
+#   ssh server 'tar xzf kubectl-sheep-offline-amd64.tar.gz && bash kubectl-sheep-offline/wsl-setup.sh'
+#   The script then installs the bundled binary instead of building; only the
+#   Rancher instances must be reachable from that host.
+#   SHEEP_BINARY=/path/to/kubectl-sheep bash wsl-setup.sh   # same, with any prebuilt binary
+#
 set -euo pipefail
 
 # ─── Team configuration — edit this block ────────────────────────────────────
@@ -48,17 +58,27 @@ GO_VERSION="${GO_VERSION:-1.26.0}"
 BIN_DIR="$HOME/.local/bin"
 SRC_DIR="$HOME/.local/src/kubectl-sheep"
 SHEEP="$BIN_DIR/kubectl-sheep"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
 die()  { printf '\n\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# A prebuilt binary next to this script (offline bundle) or via SHEEP_BINARY
+# skips git, Go and every download.
+PREBUILT="${SHEEP_BINARY:-}"
+if [ -z "$PREBUILT" ] && [ -x "$SCRIPT_DIR/kubectl-sheep" ]; then
+  PREBUILT="$SCRIPT_DIR/kubectl-sheep"
+fi
+
 # ─── 0. Preconditions ────────────────────────────────────────────────────────
 IS_WSL=0
 grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 [ "$IS_WSL" = 1 ] || note "Plain Linux detected (no WSL): the kubeconfig stays at ~/.kube/config."
-command -v git >/dev/null || die "git is required (sudo apt install git)"
-command -v curl >/dev/null || die "curl is required (sudo apt install curl)"
+if [ -z "$PREBUILT" ] || [ "${1:-}" = "bundle" ]; then
+  command -v git >/dev/null || die "git is required (sudo apt install git) — or run this script with the offline bundle, see the header"
+  command -v curl >/dev/null || die "curl is required (sudo apt install curl)"
+fi
 mkdir -p "$BIN_DIR"
 
 # ─── 1. Go toolchain (user-local, no sudo) ───────────────────────────────────
@@ -85,17 +105,53 @@ ensure_go() {
   export PATH="$HOME/.local/go/bin:$PATH"
 }
 
-# ─── 2. Build kubectl-sheep ──────────────────────────────────────────────────
-say "Building kubectl-sheep from ${REPO_URL} (${REPO_REF})"
-ensure_go
-if [ -d "$SRC_DIR/.git" ]; then
-  git -C "$SRC_DIR" fetch -q origin "$REPO_REF"
-  git -C "$SRC_DIR" checkout -q FETCH_HEAD
-else
-  rm -rf "$SRC_DIR"
-  git clone -q --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SRC_DIR"
+fetch_source() {
+  if [ -d "$SRC_DIR/.git" ]; then
+    git -C "$SRC_DIR" fetch -q origin "$REPO_REF"
+    git -C "$SRC_DIR" checkout -q FETCH_HEAD
+  else
+    rm -rf "$SRC_DIR"
+    git clone -q --depth 1 --branch "$REPO_REF" "$REPO_URL" "$SRC_DIR"
+  fi
+}
+
+# ─── bundle: build a static binary + this script for hosts without internet ──
+if [ "${1:-}" = "bundle" ]; then
+  arch="${BUNDLE_ARCH:-amd64}"
+  out="kubectl-sheep-offline-${arch}"
+  say "Building offline bundle for linux/${arch}"
+  ensure_go
+  fetch_source
+  rm -rf "$out" && mkdir -p "$out"
+  (cd "$SRC_DIR" && GOTOOLCHAIN=auto CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+     go build -trimpath -ldflags="-s -w" -o "$OLDPWD/$out/kubectl-sheep" ./cmd/kubectl-sheep)
+  cp "${BASH_SOURCE[0]}" "$out/wsl-setup.sh"
+  if [ -n "${INSTANCES_FILE:-}" ] && [ -f "$INSTANCES_FILE" ]; then
+    cp "$INSTANCES_FILE" "$out/instances.txt"
+  fi
+  tar -czf "$out.tar.gz" "$out"
+  rm -rf "$out"
+  say "Done: $out.tar.gz"
+  note "Copy it to the host and run:  tar xzf $out.tar.gz && bash $out/wsl-setup.sh"
+  note "(instances.txt inside the bundle is picked up automatically)"
+  exit 0
 fi
-(cd "$SRC_DIR" && GOTOOLCHAIN=auto go build -trimpath -o "$SHEEP" ./cmd/kubectl-sheep)
+
+# ─── 2. Install kubectl-sheep ────────────────────────────────────────────────
+if [ -n "$PREBUILT" ]; then
+  say "Installing prebuilt kubectl-sheep from $PREBUILT"
+  [ -x "$PREBUILT" ] || die "$PREBUILT is not an executable file"
+  install -m 0755 "$PREBUILT" "$SHEEP"
+  if [ -z "${INSTANCES_FILE:-}" ] && [ -f "$SCRIPT_DIR/instances.txt" ]; then
+    mapfile -t INSTANCES < <(grep -Ev '^\s*(#|$)' "$SCRIPT_DIR/instances.txt")
+    note "using instance list from $SCRIPT_DIR/instances.txt"
+  fi
+else
+  say "Building kubectl-sheep from ${REPO_URL} (${REPO_REF})"
+  ensure_go
+  fetch_source
+  (cd "$SRC_DIR" && GOTOOLCHAIN=auto go build -trimpath -o "$SHEEP" ./cmd/kubectl-sheep)
+fi
 note "installed $SHEEP ($("$SHEEP" version 2>/dev/null || echo dev))"
 
 if ! command -v kubectl >/dev/null; then
