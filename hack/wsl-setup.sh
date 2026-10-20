@@ -96,7 +96,13 @@ fi
 (cd "$SRC_DIR" && GOTOOLCHAIN=auto go build -trimpath -o "$SHEEP" ./cmd/kubectl-sheep)
 note "installed $SHEEP ($("$SHEEP" version 2>/dev/null || echo dev))"
 
-command -v kubectl >/dev/null || note "Note: kubectl is not installed in WSL. The Windows kubectl will still work; install it in WSL to use 'kubectl sheep …' here."
+if ! command -v kubectl >/dev/null; then
+  if [ "$IS_WSL" = 1 ]; then
+    note "Note: kubectl is not installed in WSL. The Windows kubectl will still work; install it in WSL to use 'kubectl sheep …' here."
+  else
+    note "Note: kubectl is not installed; install it to use the fetched contexts on this host."
+  fi
+fi
 
 # ─── 3. Share the Windows kubeconfig ─────────────────────────────────────────
 say "Choosing the kubeconfig to write"
